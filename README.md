@@ -1,1 +1,100 @@
 # HDR_CNN_Rafal
+
+功能说明
+=================================================================
+a standard 8-bit single exposed image can be fed to the network, which then reconstructs the missing information in order to create a high dynamic range (HDR) image.
+
+参考
+=================================================================
+https://github.com/gabrieleilertsen/hdrcnn
+
+安装依赖环境
+=================================================================
+python3.6（3.7出问题）
+gcc --version  查看gcc版本
+pip install numpy scipy tensorflow-gpu==1.4 tensorlayer==1.4.2 OpenEXR
+
+安装ilmbase：
+tar -zxvf ilmbase-1.0.2.tar.gz
+./configure
+make
+make install
+在~/.bashrc的LD_LIBRARY_PATH添加/usr/local/lib
+
+安装OpenEXR：
+tar -zxvf zlib-1.2.7.tar.gz
+./configure
+make
+make install
+
+可能的问题：
+chmod a+w /usr/local/include/OpenEXR/ImathMatrix.h
+vi /usr/local/include/OpenEXR/ImathMatrix.h
+#include <string.h>
+
+vi ./exrenvmap/blurImage.cpp
+#include <string.h>
+
+训练
+=================================================================
+training_code目录下：
+virtualcamera目录  用于数据增广，将HDR图像转为LDR图像
+hdrcnn_train.py    训练脚本
+
+The preprocessing application needs to be compiled with OpenCV.
+For the virtual camera pre-processing, OpenCV is used both to read HDR images, and to output LDR JPEG images.
+
+In order to run a training session, compile the virtual camera application before executing the training script:
+$ cd virtualcamera/
+$ gcc -Wall -lm -lstdc++ -lopencv_core -lopencv_imgproc -lopencv_imgcodecs virtualcamera.cpp -o virtualcamera
+$ cd ..
+$ python hdrcnn_training.py
+
+Pre-training:
+$ python3 -u hdrcnn_train.py \
+    --raw_dir "PATH_TO_LDR_DATABASE" \
+    --vgg_path "PATH_TO_VGG16_WEIGHTS" \
+    --sx 224 --sy 224 \
+    --preprocess 1 \
+    --batch_size 16 \
+    --learning_rate 0.00002 \
+    --sub_im 0 \
+    --sub_im_sc1 0.5 --sub_im_sc2 0.8 \
+    --sub_im_clip1 0.7 --sub_im_clip2 0.9 \
+    --sub_im_min_jpg 100 \
+    --linearize 1 
+
+Fine-tuning:
+$ python3 -u hdrcnn_train.py \
+    --raw_dir    "PATH_TO_HDR_DATABASE" \
+    --parameters "PATH_TO_WEIGHTS_FROM_PRETRAINING" \
+    --load_params 1 \
+    --preprocess 1 \
+    --batch_size 8
+
+输入输出
+=================================================================
+Preferably, the input images should contain no or little compression (PNG or JPEG with highest quality setting).
+
+参数调节
+=================================================================
+Given the input image x, the CNN prediction y = f(x) can be controlled somewhat by altering the input image with an exponential/gamma function, and inverting this after the reconstruction,
+y = f(x 1/g)g
+
+For a value g > 1, the intensities of reconstructed bright regions will be boosted, and vice versa for g < 1. There is an input option --gamma that allows to perform this modification:
+python hdrcnn_predict.py [...] --gamma 1.2
+
+In general, a value around 1.1-1.3 may be a good idea, since this prevents underestimation of the brightest pixels, which otherwise is common
+
+gamma值越大，图像中高亮区域越亮。
+
+测试
+=================================================================
+多张图片测试：
+CUDA_VISIBLE_DEVICES=1 python hdrcnn_predict.py --params trained_model/hdrcnn_params.npz --im_dir data/input --out_dir data/output --width 1024 --height 768 --gamma 1.2
+
+单张图片测试：
+CUDA_VISIBLE_DEVICES=1 python hdrcnn_predict.py --params trained_model/hdrcnn_params_compr.npz --im_dir data/input/img_001.png --out_dir data/output --width 1920 --height 1080 --gamma 1.2
+
+
+p.s. /trained_model/目录下的预训练模型过大没有上传，如需要可联系作者
